@@ -7,34 +7,18 @@
 
 #include "tc_module.h"
 
-typedef struct tc_module_node tc_module_node;
-struct tc_module_node {
-    lua_State *L;
-    int id;
-    tc_module_node *next;
-};
-
 struct tc_module {
-    tc_module_node *head;
-    tc_module_node *tail;
-    pthread_mutex_t lock;
+    lua_State *L;
 };
 
 static tc_module *module = NULL;
 
 tc_module *
 tc_module_create() {
-    int res;
-
     if (module == NULL) {
         module = (tc_module *)malloc(sizeof(tc_module));
-        module->head = NULL;
-        module->tail = NULL;
-        res = pthread_mutex_init(&(module->lock), NULL);
-        if (res != 0) {
-            printf("pthread_mutex_init failed\n");
-            exit(0);
-        }
+        module->L = luaL_newstate();
+        luaL_openlibs(module->L);
     }
 
     return module;
@@ -42,24 +26,24 @@ tc_module_create() {
 
 void
 tc_module_release(tc_module *module) {
-    pthread_mutex_destroy(&(module->lock));
+    lua_close(module->L);
     free(module);
     module = NULL;
 }
 
-static void
-_tc_module_load(lua_State *L, const char *mod_name) {
-    luaL_loadfile(L, mod_name);
+void
+tc_module_load(tc_module *module, const char *mod_name) {
+    luaL_loadfile(module->L, mod_name);
     printf("load module: %s\n", mod_name);
 }
 
-static void
-_tc_module_call(lua_State *L) {
+void
+tc_module_call(tc_module *module) {
     int res;
-    res = lua_pcall(L, 0, LUA_MULTRET, 0);
+    res = lua_pcall(module->L, 0, LUA_MULTRET, 0);
     if (res == 2) {
         printf("call res: %d\n", res);
-        printf("run error: %s\n", lua_tostring(L, -1));
+        printf("run error: %s\n", lua_tostring(module->L, -1));
     } else {
         printf("call res: %d\n", res);
     }
@@ -75,23 +59,7 @@ _init(lua_State *L, int id) {
 void
 tc_module_init(tc_module *module, int id) {
     printf("tc_module_init: %d\n", id);
-    tc_module_node *node = (tc_module_node *)malloc(sizeof(tc_module_node));
-    node->L = luaL_newstate();
-    luaL_openlibs(node->L);
-    _tc_module_load(node->L, "./lualib/tc.lua");
-    _tc_module_call(node->L);
-    _tc_module_load(node->L, "./lualib/normal.lua");
-    _tc_module_call(node->L);
-    node->id = id;
-    node->next = NULL;
-    if (module->head == NULL) {
-        module->head = node;
-        module->tail = node;
-    } else {
-        module->tail->next = node;
-        module->tail = node;
-    }
-    _init(node->L, id);
+    _init(module->L, id);
 }
 
 static void
@@ -121,23 +89,21 @@ _recv(lua_State *L, int id, char *data, int len, char *type) {
     lua_call(L, 4, 0);
 }
 
-tc_module_node *
-_find(tc_module *module, int id) {
-    tc_module_node *head = module->head;
-
-    while (head) {
-        if (head->id == id) break;
-        head = head->next;
-    }
-
-    return head;
-}
+//tc_module_node *
+//_find(tc_module *module, int id) {
+//    tc_module_node *head = module->head;
+//
+//    while (head) {
+//        if (head->id == id) break;
+//        head = head->next;
+//    }
+//
+//    return head;
+//}
 
 void
 tc_module_recv(tc_module *module, int id, char *data, int len, char *type) {
-    tc_module_node *node = _find(module, id);
-    if (node == NULL) return;
-    _recv(node->L, id, data, len, type);
+    _recv(module->L, id, data, len, type);
 }
 
 //static void
